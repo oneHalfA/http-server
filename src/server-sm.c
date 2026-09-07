@@ -10,6 +10,7 @@ static const srv_state_e transition_table_server[SRV_STATE_COUNT][SRV_EVENT_COUN
     },
 
     [SRV_STATE_LISTENING] = {
+        [SRV_EVENT_RESET] = SRV_STATE_LISTENING,
         [SRV_EVENT_CONNECTION_RECEIVED] = SRV_STATE_ACCEPTED,
     },
     [SRV_STATE_ACCEPTED] = {

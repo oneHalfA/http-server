@@ -1,4 +1,6 @@
 #include "server.h"
+#include "common.h"
+#include <errno.h>
 #include <pthread.h>
 
 uint16_t num_active_clients = 0;
@@ -88,7 +90,7 @@ client_ctx_t *accept_connection(server_ctx_t *server) {
 
 
     if (!conn_ctx) {
-        server->sm.event_trigger = SRV_EVENT_ERROR;
+        server->sm.event_trigger = SRV_EVENT_RESET; 
         return NULL;
     }
 
@@ -100,7 +102,12 @@ client_ctx_t *accept_connection(server_ctx_t *server) {
 
     if (conn_ctx->fd == -1) {
         ERR_LOG("accept()");
-        server->sm.event_trigger = SRV_EVENT_ERROR;
+        if (errno == EINVAL)
+            server->sm.event_trigger = SRV_EVENT_ERROR; 
+        else
+            server->sm.event_trigger = SRV_EVENT_RESET; 
+        
+        close(conn_ctx->fd);
         free(conn_ctx);
         return NULL;
     }
@@ -109,7 +116,8 @@ client_ctx_t *accept_connection(server_ctx_t *server) {
                   get_ip(&conn_ctx->address),
                   conn_ctx->readable_format.ip, MAX_ADDR_LEN) == NULL) {
         ERR_LOG("inet_ntop()");
-        server->sm.event_trigger = SRV_EVENT_ERROR;
+        server->sm.event_trigger = SRV_EVENT_RESET;
+        close(conn_ctx->fd);
         free(conn_ctx);
         return NULL;
     }
@@ -124,6 +132,13 @@ client_ctx_t *accept_connection(server_ctx_t *server) {
 void init_client_connection_thread(client_ctx_t *new_con, server_ctx_t *server) {
     int rv = OK;
     pthread_t new_th;
+    pthread_attr_t pattr;
+
+    if (pthread_attr_init(&pattr) != 0) {
+        ERR_LOG("pthread_attr_init()");
+        goto end;
+    }
+    pthread_attr_setdetachstate(&pattr, PTHREAD_CREATE_DETACHED);
 
     new_con->sm.current_state = CONN_STATE_ACCEPTED;
     rv = pthread_create(&new_th, NULL, handle_conn_states, new_con);
@@ -135,17 +150,9 @@ void init_client_connection_thread(client_ctx_t *new_con, server_ctx_t *server) 
         return;
     }
 
-    rv = pthread_detach(new_th);
-    if (rv != OK) {
-        close(new_con->fd);
-        free(new_con);
-        ERR_LOG("Could not set detach on new thread.");
-        return;
-    }
-
     pthread_mutex_lock(&mutex);
     num_active_clients++;
     pthread_mutex_unlock(&mutex);
-
+end:
     server->sm.event_trigger = SRV_EVENT_RESET;
 }
